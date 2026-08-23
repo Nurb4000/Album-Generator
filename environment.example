@@ -1,0 +1,26 @@
+# Rename this to .env and be sure to change all the addressesa, ports and locations as needed
+
+# Shell-exported variables override these values.
+
+LLM_URL=http://10.0.1.27:8080/
+
+# Backend locations (each contains bin/ and models/)
+MUSICGEN_DIR=/opt/musicgen
+SDGUI_DIR=/opt/sd-gui
+
+HOST=0.0.0.0
+PORT=3002
+
+TARGET_DURATION_DEFAULT=180
+DURATION_JITTER=0.08
+
+SYNTH_MODEL=acestep-v15-xl-turbo-Q8_0.gguf
+LM_MODEL=acestep-5Hz-lm-4B-Q8_0.gguf
+INFERENCE_STEPS=10
+
+COVER_WIDTH=768
+COVER_HEIGHT=768
+COVER_STEPS=10
+COVER_MODEL=z_image_turbo-Q8_0.gguf
+COVER_LLM=qwen_3_4b-Q8_0.gguf
+COVER_VAE=ae.safetensors

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-[#121212]">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Album Generator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<style type="text/tailwindcss">
+:root {
+--text-primary: #ffffff;
+--bg-primary: #121212;
+--bg-secondary: #1e1e1e;
+--bg-input: #2d2d2d;
+--border-color: #444;
+--btn-primary: #1a73e8;
+--btn-primary-hover: #1557b0;
+}
+body { background-color: var(--bg-primary); color: var(--text-primary); }
+input, textarea { color: #fff !important; }
+.text-input {
+@apply w-full px-3 py-2 rounded-md border focus:outline-none focus:ring-2;
+background-color: var(--bg-input);
+border-color: var(--border-color);
+box-shadow: 0 0 0 0.25rem rgba(130,130,130,0.25);
+}
+::placeholder { color: #a0aec0 !important; opacity: 1; }
+.btn { @apply px-4 py-2 rounded-md font-medium transition-colors duration-200; }
+.btn-primary { background-color: var(--btn-primary); color: white; }
+.btn-primary:hover:not(:disabled) { background-color: var(--btn-primary-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.card-style { background-color: var(--bg-secondary); border: 1px solid #333; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background-color: var(--bg-input); }
+::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 4px; }
+.track-row { @apply flex items-center justify-between px-4 py-2 rounded-md bg-[#2d2d2d] border border-[#444]; }
+.status-icon { @apply text-sm font-bold w-6 text-center; }
+.spinner { @apply inline-block w-3 h-3 align-middle;
+border: 2px solid #1a73e8; border-top-color: transparent; border-radius: 50%;
+animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="h-full">
+<div class="min-h-full flex flex-col">
+<header class="bg-[#1e1e1e] border-b border-[#333] shadow">
+<div class="max-w-5xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+<h1 class="text-3xl font-bold text-white">Album Generator</h1>
+<p class="text-sm text-gray-400 mt-1">Describe a style &mdash; get a complete album: songs, cover art, bundled zip.</p>
+</div>
+</header>
+
+<main class="flex-1 overflow-y-auto p-6">
+<div class="max-w-5xl mx-auto space-y-6">
+
+<!-- Form -->
+<div class="card-style rounded-lg p-6 space-y-5">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-2">
+<label class="block text-sm font-medium">Number of Tracks</label>
+<input type="number" id="numTracks" class="text-input" value="8" min="1" max="50">
+<p class="text-xs text-gray-400 mt-1">How many songs on the album (1-50).</p>
+</div>
+<div class="space-y-2">
+<label class="block text-sm font-medium">Target Track Length (seconds)</label>
+<input type="number" id="targetDuration" class="text-input" value="{{ target_duration }}" min="10" max="1200">
+<p class="text-xs text-gray-400 mt-1">Each song will land near this length, with natural variation.</p>
+</div>
+</div>
+
+<div class="space-y-2">
+<label class="block text-sm font-medium">Style Description <span class="text-red-500">*</span></label>
+<textarea id="style" class="text-input w-full" style="min-height: 10rem;"
+placeholder="Describe the album you want. E.g. 'A dark synthwave concept album about a night drive through a rain-soaked city — retro analog synths, driving bass, neon atmosphere.'"></textarea>
+</div>
+
+<div class="flex justify-center pt-2">
+<button type="button" id="startBtn" class="btn btn-primary px-12 py-3 text-lg font-bold">Generate Album</button>
+</div>
+<p class="text-xs text-gray-500 text-center">Defaults: seed 0 &middot; {{ defaults.inference_steps }} steps &middot; {{ defaults.synth_model }} &middot; cover {{ cover_size }}</p>
+</div>
+
+<!-- Error banner -->
+<div id="errorBanner" class="hidden p-4 bg-red-600 text-white rounded-lg"></div>
+
+<!-- Progress -->
+<div id="progressCard" class="hidden card-style rounded-lg p-6 space-y-4">
+<div class="flex items-center justify-between">
+<span id="stageMessage" class="text-lg font-semibold text-white"></span>
+<span id="percentLabel" class="text-sm text-gray-400">0%</span>
+</div>
+<div class="w-full h-3 bg-[#2d2d2d] rounded-full overflow-hidden border border-[#444]">
+<div id="progressBar" class="h-full bg-[#1a73e8] transition-all duration-500" style="width: 0%"></div>
+</div>
+<p id="stageDetail" class="text-sm text-gray-300"></p>
+</div>
+
+<!-- Track list -->
+<div id="trackListWrap" class="hidden card-style rounded-lg p-6 space-y-2">
+<p class="text-xs uppercase tracking-wide text-gray-500 font-semibold">Tracks</p>
+<div id="trackList" class="space-y-2"></div>
+</div>
+
+<!-- Cover preview -->
+<div id="coverPreviewWrap" class="hidden card-style rounded-lg p-6 text-center">
+<p class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">Cover Art Preview</p>
+<img id="coverPreview" alt="Album cover"
+class="rounded-lg border border-[#444] mx-auto" style="max-width: 256px;">
+<p id="previewAlbumName" class="mt-3 text-xl font-bold text-white"></p>
+</div>
+
+<!-- Done -->
+<div id="doneCard" class="hidden card-style rounded-lg p-6 space-y-4 text-center">
+<p class="text-xl font-bold text-green-500">&#10003; Album Complete!</p>
+<p class="text-white"><span id="doneAlbumName" class="font-semibold"></span></p>
+<p class="text-xs text-gray-400">Files stay on the server until you start a new run &mdash; download as many times as you like.</p>
+<button type="button" id="downloadBtn" class="btn bg-[#28a745] hover:bg-[#218838] text-white font-bold px-10 py-3">Download ZIP</button>
+</div>
+
+</div>
+</main>
+
+<footer class="bg-[#1e1e1e] border-t border-[#333] py-4">
+<div class="max-w-7xl mx-auto px-4 text-center">
+<p class="text-sm text-[#e0e0e0]">Courtesy IDS, 2026</p>
+</div>
+</footer>
+</div>
+
+<script>
+$(document).ready(function() {
+let pollTimer = null;
+
+function showError(msg) {
+$('#errorBanner').html(msg).removeClass('hidden');
+}
+
+function clearError() {
+$('#errorBanner').addClass('hidden');
+}
+
+const ICONS = {
+pending: '<span class="status-icon text-gray-500">&#9675;</span>',
+working: '<span class="status-icon"><span class="spinner"></span></span>',
+done: '<span class="status-icon text-green-500">&#10003;</span>',
+failed: '<span class="status-icon text-red-500">&#10007;</span>'
+};
+
+function renderTracks(tracks) {
+if (!tracks || !tracks.length) return;
+$('#trackListWrap').removeClass('hidden');
+$('#trackList').html(tracks.map(t => `
+<div class="track-row">
+<span class="text-sm text-white truncate">${t.title}</span>
+${ICONS[t.status] || ICONS.pending}${t.error ? `<span class="sr-only">${t.error}</span>` : ''}
+</div>`).join(''));
+}
+
+function renderStatus(job) {
+$('#progressBar').css('width', (job.percent || 0) + '%');
+$('#percentLabel').text((job.percent || 0) + '%');
+$('#stageMessage').text(job.message || '');
+$('#stageDetail').text(job.detail || '');
+renderTracks(job.tracks);
+
+if (job.album_name) {
+$('#doneAlbumName').text(job.album_name);
+}
+
+const coverReady = job.cover_ready === true;
+if (coverReady && !job.error) {
+const wrap = $('#coverPreviewWrap');
+if (wrap.hasClass('hidden')) {
+$('#coverPreview').attr('src', '/preview/cover?' + Date.now());
+$('#previewAlbumName').text(job.album_name || '');
+wrap.removeClass('hidden');
+}
+}
+
+if (job.done) {
+clearInterval(pollTimer);
+pollTimer = null;
+$('#startBtn').prop('disabled', false);
+
+if (job.error) {
+showError('<strong>Generation failed:</strong><br>' + $('<div>').text(job.error).html());
+return;
+}
+if (!job.error) {
+let failed = (job.tracks || []).filter(t => t.status === 'failed');
+if (failed.length) {
+showError('Some tracks failed: ' + failed.map(t => t.title).join(', ') +
+'. The rest of the album was bundled anyway.');
+}
+$('#progressCard').addClass('hidden');
+$('#doneCard').removeClass('hidden');
+$('#downloadBtn').prop('disabled', false).text('Download ZIP');
+}
+}
+}
+
+function poll() {
+$.getJSON('/status', function(job) { renderStatus(job); });
+}
+
+async function triggerDownload() {
+$('#downloadBtn').prop('disabled', true).text('Preparing download...');
+try {
+const resp = await fetch('/download');
+if (!resp.ok) throw new Error('HTTP ' + resp.status);
+const blob = await resp.blob();
+const cd = resp.headers.get('Content-Disposition') || '';
+const m = cd.match(/filename="?([^";]+)"?/);
+const name = m ? m[1] : 'album.zip';
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = name;
+document.body.appendChild(a);
+a.click();
+a.remove();
+setTimeout(() => URL.revokeObjectURL(url), 30000);
+$('#downloadBtn').prop('disabled', false).text('Download Again');
+} catch (e) {
+showError('<strong>Download failed:</strong> ' + e.message +
+' &mdash; your album is still on the server, click Download ZIP to retry.');
+$('#downloadBtn').prop('disabled', false).text('Download ZIP');
+}
+}
+
+$('#startBtn').on('click', function() {
+clearError();
+
+const style = $('#style').val().trim();
+const numTracks = parseInt($('#numTracks').val()) || 1;
+const targetDuration = parseInt($('#targetDuration').val()) || 180;
+
+if (!style) { showError('Please enter a style description.'); return; }
+
+$('#startBtn').prop('disabled', true);
+$('#doneCard').addClass('hidden');
+$('#coverPreviewWrap').addClass('hidden');
+$('#coverPreview').removeAttr('src');
+$('#previewAlbumName').text('');
+$('#trackList').empty();
+$('#trackListWrap').addClass('hidden');
+$('#progressCard').removeClass('hidden');
+$('#progressBar').css('width', '0%');
+$('#percentLabel').text('0%');
+$('#stageMessage').text('Starting...');
+$('#stageDetail').text('');
+
+$.ajax({
+url: '/start',
+type: 'POST',
+contentType: 'application/json',
+data: JSON.stringify({
+style: style,
+num_tracks: numTracks,
+target_duration: targetDuration
+}),
+success: function(resp) {
+if (resp.status === 'started') {
+pollTimer = setInterval(poll, 1500);
+} else {
+showError(resp.message || 'Failed to start.');
+$('#startBtn').prop('disabled', false);
+}
+},
+error: function(xhr) {
+let msg = 'Server error.';
+if (xhr.responseJSON && xhr.responseJSON.message) msg = xhr.responseJSON.message;
+showError(msg);
+$('#startBtn').prop('disabled', false);
+$('#progressCard').addClass('hidden');
+}
+});
+});
+
+$('#downloadBtn').on('click', function() {
+if (!$(this).prop('disabled')) triggerDownload();
+});
+});
+</script>
+</body>
+</html>
