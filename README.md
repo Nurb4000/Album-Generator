@@ -110,7 +110,6 @@ click **Download ZIP** again.
 - [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) — image backend
 - [acestep.cpp-simple-GUI](https://github.com/Nurb4000/acestep.cpp-simple-GUI) — manual single-song GUI (the music side of this pipeline, interactive)
 - [StableDiffusion.CPP-GUI](https://github.com/Nurb4000/StableDiffusion.CPP-GUI) — manual image-generation GUI
-- [MusicGen-Json-Creator](../MusicGen-Json-Creator) — plan-only sibling: generates track JSONs without rendering audio
 
 Screenshot:
 
