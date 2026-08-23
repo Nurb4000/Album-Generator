@@ -111,3 +111,8 @@ click **Download ZIP** again.
 - [acestep.cpp-simple-GUI](https://github.com/Nurb4000/acestep.cpp-simple-GUI) — manual single-song GUI (the music side of this pipeline, interactive)
 - [StableDiffusion.CPP-GUI](https://github.com/Nurb4000/StableDiffusion.CPP-GUI) — manual image-generation GUI
 - [MusicGen-Json-Creator](../MusicGen-Json-Creator) — plan-only sibling: generates track JSONs without rendering audio
+
+Screenshot:
+
+<img width="624" height="899" alt="image" src="https://github.com/user-attachments/assets/67ddf231-0ad8-41f3-be81-b5a16c46dbfd" />
+
