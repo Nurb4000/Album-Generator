@@ -200,7 +200,7 @@ def call_llm(url: str, messages: list, temperature: float, max_tokens: int,
     resp = requests.post(
         f"{url.rstrip('/')}/v1/chat/completions",
         json=payload,
-        timeout=600
+        timeout=6000
     )
     if resp.status_code == 400 and disable_thinking:
         logger.info("Server rejected chat_template_kwargs; retrying without it.")
