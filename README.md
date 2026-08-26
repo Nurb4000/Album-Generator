@@ -43,6 +43,7 @@ the browser before downloading the full album.
   - `title`   = track name
   - `album`   = album name
   - `tracknumber` = track position (e.g. "1", "2", ...)
+  - Coverart added to FLAC metadata
 - WAV files are NOT included in the final zip — only FLAC, JSON, TXT, and JPG.
 
 ### Negative prompt
