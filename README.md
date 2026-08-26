@@ -114,7 +114,7 @@ COVER_VAE=ae.safetensors
 
 Track JSONs are created with fixed production-friendly defaults:
 
-- `seed: 0` (random each run)
+- `seed: 0` 
 - `inference_steps: 10`
 - synth model: `acestep-v15-xl-turbo-Q8_0.gguf` (turbo = fast)
 - durations land within ~+/-10% of your target length so the album has natural
