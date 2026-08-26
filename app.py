@@ -12,6 +12,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file
 from PIL import Image
 from dotenv import load_dotenv
+from mutagen.flac import FLAC
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
@@ -59,6 +60,7 @@ TRACK_DEFAULTS = {
     "synth_batch_size": 1, "lm_temperature": 0.5, "lm_cfg_scale": 7,
     "lm_top_p": 0.5, "lm_top_k": 0,
     "lm_negative_prompt": "bad audio, robotic vocals, autotune, distortion, spoken word, overly loud backing vocals, midi artifact, mechanical piano, glitchy drums, overcompressed, muddy mix, muddy bass, heavy reverb, crowd noise, background noise, unwanted silence, chaotic arrangement, predictable loops, repetitive",
+    "negative_prompt": "bad audio, robotic vocals, autotune, distortion, spoken word, overly loud backing vocals, midi artifact, mechanical piano, glitchy drums, overcompressed, muddy mix, muddy bass, heavy reverb, crowd noise, background noise, unwanted silence, chaotic arrangement, predictable loops, repetitive",
     "use_cot_caption": True,
     "audio_codes": "", "inference_steps": INFERENCE_STEPS, "guidance_scale": 0.0, "shift": 10,
     "dcw_scaler": 0.0, "dcw_high_scaler": 0.0, "dcw_mode": "low",
@@ -111,8 +113,8 @@ def coerce_track_types(track: dict) -> dict:
 
 def slugify(text, fallback="untitled"):
     s = re.sub(r"[^\w\s-]", "", str(text), flags=re.UNICODE).strip()
-    s = re.sub(r"[\s\-]+", "_", s)
-    s = re.sub(r"_+", "_", s).strip("_")
+    s = re.sub(r"[\s\-]+", " ", s)
+    s = re.sub(r" +", " ", s).strip()
     return s[:64] or fallback
 
 
@@ -334,12 +336,14 @@ class AlbumGeneratorApp:
         with self.job_lock:
             self.job.update(kwargs)
 
-    def job_track_update(self, index, status, error=None):
+    def job_track_update(self, index, status, error=None, audio_url=None):
         with self.job_lock:
             if 0 <= index < len(self.job["tracks"]):
                 self.job["tracks"][index]["status"] = status
                 if error is not None:
                     self.job["tracks"][index]["error"] = error
+                if audio_url is not None:
+                    self.job["tracks"][index]["audio_url"] = audio_url
 
     def _clean_output_dir(self):
         for f in OUTPUT_DIR.iterdir():
@@ -415,6 +419,21 @@ class AlbumGeneratorApp:
                 return send_file(cover, mimetype='image/jpeg')
             return jsonify({"error": "Cover not available yet"}), 404
 
+        @self.app.route('/preview/audio/<path:filename>')
+        def preview_audio(filename):
+            allowed = set()
+            for f in OUTPUT_DIR.iterdir():
+                if f.is_file() and f.suffix.lower() == '.flac':
+                    allowed.add(f.name)
+                elif f.is_file() and f.suffix.lower() == '.wav':
+                    allowed.add(f.name)
+            if filename not in allowed:
+                return jsonify({"error": "File not found"}), 404
+            audio_path = OUTPUT_DIR / filename
+            if filename.endswith('.flac'):
+                return send_file(audio_path, mimetype='audio/flac')
+            return send_file(audio_path, mimetype='audio/wav')
+
         @self.app.route('/download')
         def download():
             with self.job_lock:
@@ -463,20 +482,20 @@ class AlbumGeneratorApp:
                     d = random.randint(dur_min, dur_max)
                 merged["duration"] = d
 
-                slug = slugify(raw.get("title") or f"Track_{i+1}", f"Track_{i+1}")
+                slug = slugify(raw.get("title") or f"Track {i+1}", f"Track {i+1}")
                 base_slug = slug
                 n = 2
                 while slug in used_slugs:
-                    slug = f"{base_slug}_{n}"
+                    slug = f"{base_slug} {n}"
                     n += 1
                 used_slugs.add(slug)
                 track_entries.append({"title": raw.get("title") or f"Track {i+1}", "slug": slug,
-                                      "json": OUTPUT_DIR / f"{i+1:02d}_{slug}.json"})
-                with open(OUTPUT_DIR / f"{i+1:02d}_{slug}.json", 'w', encoding='utf-8') as f:
+                                      "json": OUTPUT_DIR / f"{i+1:02d} - {slug}.json"})
+                with open(OUTPUT_DIR / f"{i+1:02d} - {slug}.json", 'w', encoding='utf-8') as f:
                     json.dump(merged, f, indent=4)
 
-            self.job_update(tracks=[{"title": t["title"], "slug": t["slug"], "status": "pending"}
-                                    for t in track_entries])
+            self.job_update(tracks=[{"title": t["title"], "slug": t["slug"], "status": "pending",
+                                     "audio_url": None} for t in track_entries])
 
             wav_paths = []
             span_per_track = 84.0 / len(track_entries)
@@ -487,9 +506,13 @@ class AlbumGeneratorApp:
                                 detail=f"Track {i+1}: \"{entry['title']}\"", percent=pct)
                 self.job_track_update(i, "working")
                 try:
-                    wav_path = self._generate_track(entry)
+                    wav_path = self._generate_track(entry, i+1)
+                    track_num = i + 1
+                    flac_name = f"{track_num:02d} - {entry['slug']}.flac"
+                    flac_path = OUTPUT_DIR / flac_name
+                    audio_url = f"/preview/audio/{flac_name}" if flac_path.exists() else f"/preview/audio/{wav_path.name}"
                     wav_paths.append(wav_path)
-                    self.job_track_update(i, "done")
+                    self.job_track_update(i, "done", audio_url=audio_url)
                     logger.info(f"Track {i+1}/{len(track_entries)} done: {entry['title']}")
                 except Exception as e:
                     logger.exception(f"Track {i+1} failed: {entry['title']}")
@@ -608,7 +631,7 @@ class AlbumGeneratorApp:
             raise RuntimeError(detail)
         return result
 
-    def _generate_track(self, entry):
+    def _generate_track(self, entry, track_num):
         json_path = entry["json"]
         stem = json_path.stem
 
@@ -652,7 +675,7 @@ class AlbumGeneratorApp:
             raise RuntimeError(f"No WAV file was produced for '{entry['title']}'.")
 
         wav_out = max(candidates, key=lambda p: p.stat().st_mtime)
-        final_wav = OUTPUT_DIR / f"{entry['slug']}.wav"
+        final_wav = OUTPUT_DIR / f"{track_num:02d} - {entry['slug']}.wav"
         if wav_out != final_wav:
             wav_out.replace(final_wav)
         return final_wav
@@ -692,9 +715,49 @@ class AlbumGeneratorApp:
     def _bundle_zip(self, zip_name, track_entries, wav_paths):
         zip_path = BASE_DIR / zip_name
         zip_path.unlink(missing_ok=True)
+
+        album_name = "Untitled Album"
+        album_name_path = OUTPUT_DIR / "album_name.txt"
+        if album_name_path.exists():
+            album_name = album_name_path.read_text(encoding='utf-8').strip()
+
+        flac_paths = []
+        for i, wav_path in enumerate(wav_paths):
+            if not wav_path.exists():
+                continue
+            track_num = i + 1
+            entry = track_entries[i] if i < len(track_entries) else None
+            slug = entry["slug"] if entry else wav_path.stem
+            flac_path = OUTPUT_DIR / f"{track_num:02d} - {slug}.flac"
+
+            try:
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-i", str(wav_path), "-c:a", "flac", str(flac_path)],
+                    capture_output=True, text=True, timeout=600
+                )
+                if result.returncode != 0:
+                    logger.warning(f"FFmpeg conversion failed for {wav_path.name}: {result.stderr[:200]}")
+                    continue
+
+                title = entry["title"] if entry else slug
+                try:
+                    tag = FLAC(str(flac_path))
+                    tag["title"] = title
+                    tag["album"] = album_name
+                    tag["artist"] = "AI Generator"
+                    tag["tracknumber"] = str(track_num)
+                    tag.save()
+                except Exception as e:
+                    logger.warning(f"Could not tag FLAC {flac_path.name}: {e}")
+
+                flac_paths.append(flac_path)
+                logger.info(f"Converted {wav_path.name} -> {flac_path.name}")
+            except Exception as e:
+                logger.warning(f"Error converting {wav_path.name}: {e}")
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for f in sorted(OUTPUT_DIR.iterdir()):
-                if f.is_file() and f.suffix.lower() in (".json", ".txt", ".wav", ".jpg"):
+                if f.is_file() and f.suffix.lower() in (".json", ".txt", ".flac", ".jpg"):
                     zf.write(f, f.name)
         logger.info(f"Bundled album into {zip_path}")
 
