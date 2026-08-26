@@ -8,18 +8,49 @@ the app runs the whole pipeline for you:
 
 ```
 1. Plan      -> LLM writes unique song titles, lyrics/captions per track,
-                an album name (album_name.txt), and a cover-art prompt
-                (album_cover.txt)
+                 an album name (album_name.txt), and a cover-art prompt
+                 (album_cover.txt)
 2. Music     -> for each track: ace-lm generates audio codes (merged back into
-                the track's local json), then ace-synth renders <Title>.wav
+                 the track's local json), then ace-synth renders the audio
 3. Cover     -> sd-cli renders the album cover at 768x768 -> cover.jpg
-4. Bundle    -> everything zipped as <Album Name>.zip; download manually via
-                the Download ZIP button (re-downloadable). Files stay on the
-                server until the next run starts, which wipes them.
+4. Bundle    -> WAV files are converted to FLAC (with metadata tags), then
+                 everything zipped as <Album Name>.zip; download manually via
+                 the Download ZIP button (re-downloadable). Files stay on the
+                 server until the next run starts, which wipes them.
 ```
 
 Live progress is shown in the UI (current stage, percent, and which track is
-rendering), so you always know it is working.
+rendering), so you always know it is working. Once a track finishes generating,
+a native HTML5 audio player appears inline so you can preview it directly in
+the browser before downloading the full album.
+
+## Changelog
+
+### File naming format (track files)
+- Track JSON and audio files now use the format: `NN - Song Title.json` / `NN - Song Title.flac`
+  where `NN` is the zero-padded track number.
+- Words in titles are separated by spaces (not underscores).
+- Both JSON and WAV/FLAC files share the same naming convention, including the track number prefix.
+
+### Audio preview in the UI
+- Each track now has a native HTML5 `<audio>` player that appears once generation completes.
+- Players use the browser's built-in controls (play/pause, seek, volume).
+- Served via `/preview/audio/<filename>` — no server-side streaming libraries required.
+
+### FLAC conversion & metadata tagging
+- WAV renderings are converted to FLAC using `ffmpeg` before bundling.
+- FLAC files are tagged with:
+  - `title`   = track name
+  - `album`   = album name
+  - `tracknumber` = track position (e.g. "1", "2", ...)
+- WAV files are NOT included in the final zip — only FLAC, JSON, TXT, and JPG.
+
+### Negative prompt
+- A default negative prompt is applied during synthesis to discourage:
+  bad audio quality, robotic vocals, autotune, distortion, spoken word,
+  overly loud backing vocals, MIDI artifacts, mechanical piano, glitchy drums,
+  overcompression, muddy mix/bass, heavy reverb, crowd noise, background noise,
+  unwanted silence, chaotic arrangement, predictable loops, and repetitiveness.
 
 ## Dependencies
 
@@ -41,10 +72,13 @@ by the individual GUIs):
 
 Defaults point at `/opt/musicgen` and `/opt/sd-gui` (see `.env` below).
 
+**System dependency:** `ffmpeg` must be installed and available on `$PATH` for
+WAV-to-FLAC conversion during the bundling step.
+
 ## Install & Run
 
 ```bash
-pip install -r requirements.txt   # flask, requests, pillow, python-dotenv
+pip install -r requirements.txt   # flask, requests, pillow, python-dotenv, mutagen
 python3 app.py                    # serves on 0.0.0.0:3002
 ```
 
@@ -95,9 +129,10 @@ A single `<Album Name>.zip` containing:
 album_name.txt            the album name
 album_cover.txt           the Stable Diffusion prompt used for the cover
 cover.jpg                 768x768 album art
-NN_<Song_Name>.json       final ACE-Step request json per track
+NN - Song Title.json      final ACE-Step request json per track
                           (includes generated audio_codes)
-<Song_Name>.wav           rendered audio, named after the track
+NN - Song Title.flac      converted audio with metadata tags
+                          (title, album, track number)
 ```
 
 The zip downloads automatically when the album finishes; temp files on the
