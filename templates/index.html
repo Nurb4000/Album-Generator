@@ -34,6 +34,8 @@ box-shadow: 0 0 0 0.25rem rgba(130,130,130,0.25);
 ::-webkit-scrollbar-track { background-color: var(--bg-input); }
 ::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 4px; }
 .track-row { @apply flex items-center justify-between px-4 py-2 rounded-md bg-[#2d2d2d] border border-[#444]; }
+.audio-player { @apply w-full mt-1; }
+.audio-player audio { width: 100%; height: 28px; }
 .status-icon { @apply text-sm font-bold w-6 text-center; }
 .spinner { @apply inline-block w-3 h-3 align-middle;
 border: 2px solid #1a73e8; border-top-color: transparent; border-radius: 50%;
@@ -149,11 +151,20 @@ failed: '<span class="status-icon text-red-500">&#10007;</span>'
 function renderTracks(tracks) {
 if (!tracks || !tracks.length) return;
 $('#trackListWrap').removeClass('hidden');
-$('#trackList').html(tracks.map(t => `
-<div class="track-row">
-<span class="text-sm text-white truncate">${t.title}</span>
+$('#trackList').html(tracks.map((t, idx) => {
+let audioHtml = '';
+if (t.audio_url && t.status === 'done') {
+audioHtml = `<div class="audio-player"><audio controls preload="none" src="${t.audio_url}"></audio></div>`;
+}
+const trackNum = (idx + 1).toString().padStart(2, '0');
+return `<div class="track-row">
+<div class="flex-1 min-w-0 mr-2">
+<span class="text-sm text-white truncate block">${trackNum}. ${t.title}</span>
+${audioHtml}
+</div>
 ${ICONS[t.status] || ICONS.pending}${t.error ? `<span class="sr-only">${t.error}</span>` : ''}
-</div>`).join(''));
+</div>`;
+}).join(''));
 }
 
 function renderStatus(job) {
