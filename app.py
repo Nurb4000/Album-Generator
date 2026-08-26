@@ -747,6 +747,7 @@ class AlbumGeneratorApp:
                     tag["artist"] = "AI Generator"
                     tag["tracknumber"] = str(track_num)
                     tag.save()
+                    logger.info(f"Tagged {flac_path.name}")
                 except Exception as e:
                     logger.warning(f"Could not tag FLAC {flac_path.name}: {e}")
 
@@ -754,16 +755,15 @@ class AlbumGeneratorApp:
                 if cover_jpg.exists():
                     try:
                         pic = Picture()
-                        pic.type = 3  # Cover other
+                        pic.type = 3
                         pic.mime = "image/jpeg"
                         pic.data = cover_jpg.read_bytes()
                         pic.width = 768
                         pic.height = 768
-                        pic.pack()
-
-                        tag.clear_pictures()
-                        tag.add_picture(pic)
-                        tag.save()
+                        tag2 = FLAC(str(flac_path))
+                        tag2.clear_pictures()
+                        tag2.add_picture(pic)
+                        tag2.save()
                         logger.info(f"Embedded cover art into {flac_path.name}")
                     except Exception as e:
                         logger.warning(f"Could not embed cover art in {flac_path.name}: {e}")
