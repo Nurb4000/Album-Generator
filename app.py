@@ -12,7 +12,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file
 from PIL import Image
 from dotenv import load_dotenv
-from mutagen.flac import FLAC
+from mutagen.flac import FLAC, Picture
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
@@ -749,6 +749,24 @@ class AlbumGeneratorApp:
                     tag.save()
                 except Exception as e:
                     logger.warning(f"Could not tag FLAC {flac_path.name}: {e}")
+
+                cover_jpg = OUTPUT_DIR / "cover.jpg"
+                if cover_jpg.exists():
+                    try:
+                        pic = Picture()
+                        pic.type = 3  # Cover other
+                        pic.mime = "image/jpeg"
+                        pic.data = cover_jpg.read_bytes()
+                        pic.width = 768
+                        pic.height = 768
+                        pic.pack()
+
+                        tag.clear_pictures()
+                        tag.add_picture(pic)
+                        tag.save()
+                        logger.info(f"Embedded cover art into {flac_path.name}")
+                    except Exception as e:
+                        logger.warning(f"Could not embed cover art in {flac_path.name}: {e}")
 
                 flac_paths.append(flac_path)
                 logger.info(f"Converted {wav_path.name} -> {flac_path.name}")
