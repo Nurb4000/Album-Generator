@@ -455,6 +455,13 @@ class AlbumGeneratorApp:
         try:
             self._clean_output_dir()
 
+            with open(OUTPUT_DIR / "request.txt", 'w', encoding='utf-8') as f:
+                f.write("Original Request\n")
+                f.write("================\n\n")
+                f.write(f"Style: {style}\n")
+                f.write(f"Number of tracks: {num_tracks}\n")
+                f.write(f"Target duration (seconds): {target_duration}\n")
+
             dur_min = max(10, int(target_duration * (1 - DURATION_JITTER)))
             dur_max = int(target_duration * (1 + DURATION_JITTER))
 
