@@ -178,6 +178,7 @@ click **Download ZIP** again.
 
 Screenshot:
 
-<img width="553" height="798" alt="image" src="https://github.com/user-attachments/assets/6f6f4bfb-3baf-4e1d-b8d6-35fb86408488" />
+<img width="660" height="943" alt="image" src="https://github.com/user-attachments/assets/6ae346ad-7951-4573-97da-fe8353a98a1d" />
+
 
 
