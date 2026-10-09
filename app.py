@@ -309,22 +309,22 @@ def build_tracks_system_prompt(guide_content: str) -> str:
     )
 
 
-def build_cover_system_prompt(guide_content: str) -> str:
+def build_reference_system_prompt(guide_content: str) -> str:
     return (
         "You are an expert AI music producer, lyricist, and prompt engineer for ACE-Step 1.5, "
-        "specializing in COVER generation.\n\n"
+        "specializing in reference-guided generation.\n\n"
         f"{guide_content}\n\n"
-        "## COVER MODE (CRITICAL)\n"
-        "This album will be generated as a COVER that references an uploaded source music track "
-        "(a cover reference). Every track is influenced by that reference audio through "
-        "audio_cover_strength — higher strength stays closer to the reference, lower strength "
-        "invents more freely.\n\n"
-        "Adapt each track to the cover reference:\n"
-        "- The caption must describe the STYLE SHIFT you intend to apply to the reference track's "
-        "character (the genre, instruments, production, and mood the user wants), not a generic "
+        "## REFERENCE MODE (CRITICAL)\n"
+        "This album will be generated using an uploaded reference music track. Every track draws on "
+        "that reference audio for timbre and character through a timbre reference, while the "
+        "audio_cover_strength value controls how closely each track follows the generated arrangement "
+        "(higher strength stays closer to the planned structure, lower strength invents more freely).\n\n"
+        "Adapt each track to the reference:\n"
+        "- The caption must describe the STYLE you intend to apply (the genre, instruments, production, "
+        "and mood the user wants), informed by the reference track's character, not a generic "
         "description.\n"
-        "- Keep the album cohesive: every track should feel like a distinct reinterpretation of the "
-        "same reference source, with its own angle on the style.\n\n"
+        "- Keep the album cohesive: every track should feel like a distinct interpretation sharing the "
+        "reference's character, with its own angle on the style.\n\n"
         "## CRITICAL INSTRUCTION FOR AUDIO SYNTHESIS\n"
         "EVERY LINE outside of brackets WILL BE SUNG AS LYRICS. There is no narration, "
         "description, or stage direction between tags — only words that will be vocalized.\n\n"
@@ -369,7 +369,7 @@ def build_cover_system_prompt(guide_content: str) -> str:
         "## Track Object Keys\n"
         "Each track must have:\n"
         "- title: Unique short song name (see Titles rules above).\n"
-        "- caption: A dense descriptive paragraph detailing the cover's genre, instruments, production "
+        "- caption: A dense descriptive paragraph detailing the track's genre, instruments, production "
         "style, vocals, and mood. Do NOT include BPM/key/tempo here.\n"
         "- lyrics: Full structured lyrics with bracketed tags, or '[instrumental]' for instrumental tracks.\n"
         "- bpm: Number (30-300) or 0 to auto-infer.\n"
@@ -384,7 +384,7 @@ def build_cover_system_prompt(guide_content: str) -> str:
         "- lm_top_k: Int, default 0.\n"
         "- shift: Float, default 10.\n\n"
         "Vary tempos, moods, and energy across tracks while staying true to the album's overall style "
-        "and the cover reference.\n\n"
+        "and the reference track.\n\n"
         "Return ONLY valid JSON — no explanations, no markdown, no code fences."
     )
 
@@ -548,7 +548,7 @@ class AlbumGeneratorApp:
             saved_name = f"ref_{timestamp}_{filename}"
             file_path = UPLOADS_DIR / saved_name
             file.save(file_path)
-            logger.info(f"Saved cover reference audio: {saved_name}")
+            logger.info(f"Saved reference audio: {saved_name}")
             return jsonify({"status": "ok", "filename": saved_name})
 
         @self.app.route('/clear/ref_audio', methods=['POST'])
@@ -574,7 +574,7 @@ class AlbumGeneratorApp:
             candidate = UPLOADS_DIR / ref_audio_filename
             if candidate.exists():
                 ref_audio_path = candidate
-                logger.info(f"Cover reference audio found: {ref_audio_path.name}")
+                logger.info(f"Reference audio found: {ref_audio_path.name}")
 
         try:
             self._clean_output_dir()
@@ -586,8 +586,8 @@ class AlbumGeneratorApp:
                 f.write(f"Number of tracks: {num_tracks}\n")
                 f.write(f"Target duration (seconds): {target_duration}\n")
                 if ref_audio_path:
-                    f.write(f"Cover reference: {ref_audio_path.name}\n")
-                    f.write(f"Cover strength: {audio_cover_strength}\n")
+                    f.write(f"Reference: {ref_audio_path.name}\n")
+                    f.write(f"Reference strength: {audio_cover_strength}\n")
 
             dur_min = max(10, int(target_duration * (1 - DURATION_JITTER)))
             dur_max = int(target_duration * (1 + DURATION_JITTER))
@@ -612,7 +612,7 @@ class AlbumGeneratorApp:
                 merged["synth_model"] = SYNTH_MODEL
                 merged["lm_model"] = LM_MODEL
                 if ref_audio_path:
-                    merged["task_type"] = "cover"
+                    merged["task_type"] = "text2music"
                     merged["audio_cover_strength"] = audio_cover_strength
 
                 d = safe_int(merged.get("duration"), 0)
@@ -678,7 +678,7 @@ class AlbumGeneratorApp:
                             message="Generation failed.", detail=str(e), percent=100)
 
     def _plan_tracks(self, llm_url, style, num_tracks, target_duration, ref_audio_path=None):
-        system_prompt = (build_cover_system_prompt(self.song_writing_guide) if ref_audio_path
+        system_prompt = (build_reference_system_prompt(self.song_writing_guide) if ref_audio_path
                          else build_tracks_system_prompt(self.song_writing_guide))
         user_prompt = (
             f"Create an album of {num_tracks} distinct track(s) based on this style:\n\n"
@@ -791,7 +791,7 @@ class AlbumGeneratorApp:
                 current["inference_steps"] = INFERENCE_STEPS
                 current["synth_model"] = SYNTH_MODEL
                 if ref_audio_path and ref_audio_path.exists():
-                    current["task_type"] = "cover"
+                    current["task_type"] = "text2music"
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(current, f, indent=4)
                 logger.info(f"Updated track json with generated audio codes: {json_path.name}")
