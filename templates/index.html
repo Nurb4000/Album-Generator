@@ -84,17 +84,17 @@ placeholder="Describe the album you want. E.g. 'A dark synthwave concept album a
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-[#333]">
 <div class="space-y-2">
-<label class="block text-sm font-medium">Cover Reference Track <span class="text-xs text-gray-400">(optional)</span></label>
+<label class="block text-sm font-medium">Reference Track <span class="text-xs text-gray-400">(optional)</span></label>
 <div class="flex items-center gap-2">
 <input type="file" id="refAudio" accept="audio/*" class="text-input">
 <button type="button" id="clearRefBtn" class="btn bg-[#5f6368] hover:bg-[#4a4d50] text-white whitespace-nowrap">Clear</button>
 </div>
-<p class="text-xs text-gray-400 mt-1">Upload a song to generate album tracks as covers of it. Omitting it generates original music.</p>
+<p class="text-xs text-gray-400 mt-1">Upload a song to influence the album's timbre and style. Omitting it generates original music.</p>
 </div>
 <div class="space-y-2">
-<label class="block text-sm font-medium">Cover Strength</label>
+<label class="block text-sm font-medium">Reference Strength</label>
 <input type="number" id="coverStrength" class="text-input" value="1.0" step="0.01" min="0" max="2">
-<p class="text-xs text-gray-400 mt-1">How strongly the reference influences each track. 1 = default, higher stays closer, lower invents more.</p>
+<p class="text-xs text-gray-400 mt-1">How strongly tracks follow the planned arrangement. 1 = default, lower invents more freely. Duration stays under your control.</p>
 </div>
 </div>
 <div id="refAudioStatus" class="hidden text-xs text-green-500 mt-1"></div>
@@ -157,7 +157,7 @@ $(document).ready(function() {
 let pollTimer = null;
 let refAudioFilename = '';
 
-// Cover reference upload
+// Reference audio upload
 $('#refAudio').on('change', function() {
 const file = this.files[0];
 const $status = $('#refAudioStatus');
@@ -195,7 +195,7 @@ $('#coverStrength').prop('disabled', false);
 });
 });
 
-// Clear cover reference
+// Clear reference audio
 $('#clearRefBtn').on('click', function() {
 const $status = $('#refAudioStatus');
 if (refAudioFilename) {
@@ -341,7 +341,7 @@ const audioCoverStrength = parseFloat($('#coverStrength').val());
 
 if (!style) { showError('Please enter a style description.'); return; }
 if (isNaN(audioCoverStrength) || audioCoverStrength < 0) {
-showError('Cover strength must be 0 or greater.');
+showError('Reference strength must be 0 or greater.');
 return;
 }
 
