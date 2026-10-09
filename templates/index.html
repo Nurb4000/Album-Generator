@@ -222,23 +222,41 @@ done: '<span class="status-icon text-green-500">&#10003;</span>',
 failed: '<span class="status-icon text-red-500">&#10007;</span>'
 };
 
-function renderTracks(tracks) {
-if (!tracks || !tracks.length) return;
-$('#trackListWrap').removeClass('hidden');
-$('#trackList').html(tracks.map((t, idx) => {
+let renderedTrackSigs = [];
+
+function trackInnerHtml(t, idx) {
 let audioHtml = '';
 if (t.audio_url && t.status === 'done') {
-audioHtml = `<div class="audio-player"><audio controls preload="none" src="${t.audio_url}"></audio></div>`;
+audioHtml = `<div class="audio-player"><audio controls preload="metadata" src="${t.audio_url}"></audio></div>`;
 }
 const trackNum = (idx + 1).toString().padStart(2, '0');
-return `<div class="track-row">
-<div class="flex-1 min-w-0 mr-2">
+return `<div class="flex-1 min-w-0 mr-2">
 <span class="text-sm text-white truncate block">${trackNum}. ${t.title}</span>
 ${audioHtml}
 </div>
-${ICONS[t.status] || ICONS.pending}${t.error ? `<span class="sr-only">${t.error}</span>` : ''}
-</div>`;
-}).join(''));
+${ICONS[t.status] || ICONS.pending}${t.error ? `<span class="sr-only">${t.error}</span>` : ''}`;
+}
+
+function trackSig(t) {
+return [t.title, t.status, t.audio_url || '', t.error || ''].join('|');
+}
+
+function renderTracks(tracks) {
+if (!tracks || !tracks.length) return;
+$('#trackListWrap').removeClass('hidden');
+const sigs = tracks.map(trackSig);
+const $list = $('#trackList');
+const $rows = $list.children('.track-row');
+if ($rows.length !== tracks.length) {
+$list.html(tracks.map((t, idx) => `<div class="track-row">${trackInnerHtml(t, idx)}</div>`).join(''));
+} else {
+tracks.forEach((t, idx) => {
+if (sigs[idx] !== renderedTrackSigs[idx]) {
+$rows.eq(idx).html(trackInnerHtml(t, idx));
+}
+});
+}
+renderedTrackSigs = sigs;
 }
 
 function renderStatus(job) {
@@ -333,6 +351,7 @@ $('#coverPreviewWrap').addClass('hidden');
 $('#coverPreview').removeAttr('src');
 $('#previewAlbumName').text('');
 $('#trackList').empty();
+renderedTrackSigs = [];
 $('#trackListWrap').addClass('hidden');
 $('#progressCard').removeClass('hidden');
 $('#progressBar').css('width', '0%');
