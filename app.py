@@ -10,6 +10,7 @@ import requests
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file
+from werkzeug.utils import secure_filename
 from PIL import Image
 from dotenv import load_dotenv
 from mutagen.flac import FLAC, Picture
@@ -17,6 +18,8 @@ from mutagen.flac import FLAC, Picture
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 load_dotenv(Path(os.environ.get("ALBUMGEN_ENV_FILE", BASE_DIR / ".env")))
 
@@ -306,6 +309,86 @@ def build_tracks_system_prompt(guide_content: str) -> str:
     )
 
 
+def build_cover_system_prompt(guide_content: str) -> str:
+    return (
+        "You are an expert AI music producer, lyricist, and prompt engineer for ACE-Step 1.5, "
+        "specializing in COVER generation.\n\n"
+        f"{guide_content}\n\n"
+        "## COVER MODE (CRITICAL)\n"
+        "This album will be generated as a COVER that references an uploaded source music track "
+        "(a cover reference). Every track is influenced by that reference audio through "
+        "audio_cover_strength — higher strength stays closer to the reference, lower strength "
+        "invents more freely.\n\n"
+        "Adapt each track to the cover reference:\n"
+        "- The caption must describe the STYLE SHIFT you intend to apply to the reference track's "
+        "character (the genre, instruments, production, and mood the user wants), not a generic "
+        "description.\n"
+        "- Keep the album cohesive: every track should feel like a distinct reinterpretation of the "
+        "same reference source, with its own angle on the style.\n\n"
+        "## CRITICAL INSTRUCTION FOR AUDIO SYNTHESIS\n"
+        "EVERY LINE outside of brackets WILL BE SUNG AS LYRICS. There is no narration, "
+        "description, or stage direction between tags — only words that will be vocalized.\n\n"
+        "Never use parentheses () for musical or production descriptions. All structure tags, instrumental "
+        "breaks, and musical cues MUST be delimited strictly with brackets []. If a section has no "
+        "vocals, use a single bracketed tag with no lines following it "
+        "(e.g. [Intro Instrumental], [Guitar Solo], [Musical Interlude], [Outro Instrumental]).\n"
+        "If a section has vocals, use the [Tag - modifier] pattern to keep style cues inside "
+        "the brackets (e.g. [Outro -spoken words, fading out], [Chorus -anthemic]). The lines after "
+        "the tag must be actual singable lyrics.\n\n"
+        "## Your Task\n"
+        "The user will provide a style description, a number of tracks, and a target duration. "
+        "You are creating ONE COHESIVE ALBUM: every track must feel like it belongs on the same record, "
+        "yet each track must be a distinct, interesting reinterpretation of the cover reference with "
+        "its own identity and angle on the style.\n\n"
+        "Return ONLY a valid JSON array where each element is a complete track configuration object.\n\n"
+        "## Titles (CRITICAL)\n"
+        "- Every track object MUST include a 'title' key: a unique, evocative SONG NAME (not a description).\n"
+        "- No two tracks may share a title. No numbering, no quotes, no colons. Max ~50 characters.\n"
+        "- Titles must fit the album's identity.\n\n"
+        "## Durations (CRITICAL)\n"
+        "- The user gives a TARGET duration in seconds. Each track's 'duration' must be NEAR that target: "
+        "within about +/-10%, never identical across all tracks (small natural variation is desired).\n"
+        "- Match lyric length to each track's duration:\n"
+        "  * <60s: 1 verse + 1 chorus (6-10 lines total)\n"
+        "  * 60-120s: 1-2 verses + 2 choruses\n"
+        "  * 120-180s: 2 verses + 2 choruses + optional bridge\n"
+        "  * >180s: 2-3 verses + 2-3 choruses + bridge + intro/outro\n"
+        "- Each lyric line should be 6-10 syllables. Use blank lines between sections.\n\n"
+        "## Lyrics Requirements (CRITICAL)\n"
+        "- If the song is instrumental, set lyrics to '[instrumental]'.\n"
+        "- Lyrics MUST include proper song structure tags: [Intro], [Verse 1], [Verse 2], [Chorus], "
+        "[Bridge], [Guitar Solo], [Keyboard Interlude], [Outro Instrumental], etc.\n"
+        "- Use brackets [] for ALL structural and musical cues. Never use parentheses ().\n\n"
+        "## Caption-Lyrics Consistency\n"
+        "- Instruments in Caption must match Instrumental section tags in Lyrics.\n"
+        "- Emotion in Caption must match Energy tags in Lyrics.\n"
+        "- Vocal description in Caption must match Vocal control tags in Lyrics.\n\n"
+        "## Avoiding AI-Flavored Lyrics\n"
+        "- No adjective stacking, no inconsistent rhyme patterns, no blurred section boundaries.\n"
+        "- Keep lines singable (6-10 syllables). Stick to one core metaphor per song.\n\n"
+        "## Track Object Keys\n"
+        "Each track must have:\n"
+        "- title: Unique short song name (see Titles rules above).\n"
+        "- caption: A dense descriptive paragraph detailing the cover's genre, instruments, production "
+        "style, vocals, and mood. Do NOT include BPM/key/tempo here.\n"
+        "- lyrics: Full structured lyrics with bracketed tags, or '[instrumental]' for instrumental tracks.\n"
+        "- bpm: Number (30-300) or 0 to auto-infer.\n"
+        "- duration: Number in seconds, near the target duration.\n"
+        "- keyscale: e.g. 'C Major', 'Am', or empty string to auto-infer.\n"
+        "- timesignature: e.g. '4/4', '3/4', or empty string.\n"
+        "- vocal_language: Language code (e.g. 'en') or empty string.\n"
+        "- seed: 0 for random.\n"
+        "- lm_temperature: Float 0.1-1.5, default 0.5.\n"
+        "- lm_cfg_scale: Float, default 7.\n"
+        "- lm_top_p: Float, default 0.5.\n"
+        "- lm_top_k: Int, default 0.\n"
+        "- shift: Float, default 10.\n\n"
+        "Vary tempos, moods, and energy across tracks while staying true to the album's overall style "
+        "and the cover reference.\n\n"
+        "Return ONLY valid JSON — no explanations, no markdown, no code fences."
+    )
+
+
 class AlbumGeneratorApp:
     def __init__(self):
         self.app = Flask(__name__, template_folder='templates')
@@ -363,7 +446,8 @@ class AlbumGeneratorApp:
                 'index.html',
                 defaults=TRACK_DEFAULTS,
                 target_duration=TARGET_DURATION_DEFAULT,
-                cover_size=f"{COVER_W}x{COVER_H}"
+                cover_size=f"{COVER_W}x{COVER_H}",
+                llm_url=LLM_URL.rstrip('/')
             )
 
         @self.app.route('/start', methods=['POST'])
@@ -401,7 +485,9 @@ class AlbumGeneratorApp:
 
             params = {
                 "style": style, "num_tracks": num_tracks,
-                "target_duration": target_duration, "llm_url": llm_url
+                "target_duration": target_duration, "llm_url": llm_url,
+                "ref_audio_filename": (data.get('ref_audio_filename') or '').strip(),
+                "audio_cover_strength": safe_float(data.get('audio_cover_strength', 1.0), 1.0)
             }
             t = threading.Thread(target=self._run_pipeline, args=(params,), daemon=True)
             t.start()
@@ -446,11 +532,49 @@ class AlbumGeneratorApp:
             logger.info(f"Serving album zip for download: {zip_name}")
             return send_file(zip_path, as_attachment=True, download_name=zip_name)
 
+        @self.app.route('/upload/ref_audio', methods=['POST'])
+        def upload_ref_audio():
+            if 'ref_audio' not in request.files or not request.files['ref_audio'].filename:
+                return jsonify({"status": "error", "message": "No audio file provided."}), 400
+            for f in UPLOADS_DIR.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+            file = request.files['ref_audio']
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            saved_name = f"ref_{timestamp}_{filename}"
+            file_path = UPLOADS_DIR / saved_name
+            file.save(file_path)
+            logger.info(f"Saved cover reference audio: {saved_name}")
+            return jsonify({"status": "ok", "filename": saved_name})
+
+        @self.app.route('/clear/ref_audio', methods=['POST'])
+        def clear_ref_audio():
+            for f in UPLOADS_DIR.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+            return jsonify({"status": "ok"})
+
     def _run_pipeline(self, params):
         style = params["style"]
         num_tracks = params["num_tracks"]
         target_duration = params["target_duration"]
         llm_url = params["llm_url"]
+        ref_audio_filename = params.get("ref_audio_filename", "")
+        audio_cover_strength = params.get("audio_cover_strength", 1.0)
+
+        ref_audio_path = None
+        if ref_audio_filename:
+            candidate = UPLOADS_DIR / ref_audio_filename
+            if candidate.exists():
+                ref_audio_path = candidate
+                logger.info(f"Cover reference audio found: {ref_audio_path.name}")
 
         try:
             self._clean_output_dir()
@@ -461,6 +585,9 @@ class AlbumGeneratorApp:
                 f.write(f"Style: {style}\n")
                 f.write(f"Number of tracks: {num_tracks}\n")
                 f.write(f"Target duration (seconds): {target_duration}\n")
+                if ref_audio_path:
+                    f.write(f"Cover reference: {ref_audio_path.name}\n")
+                    f.write(f"Cover strength: {audio_cover_strength}\n")
 
             dur_min = max(10, int(target_duration * (1 - DURATION_JITTER)))
             dur_max = int(target_duration * (1 + DURATION_JITTER))
@@ -468,7 +595,8 @@ class AlbumGeneratorApp:
             self.job_update(stage="planning", message="Writing songs...",
                             detail="Asking the LLM to plan your album...", percent=2)
 
-            tracks = self._plan_tracks(llm_url, style, num_tracks, target_duration)
+            tracks = self._plan_tracks(llm_url, style, num_tracks, target_duration,
+                                       ref_audio_path=ref_audio_path)
 
             self.job_update(album_name=tracks["album_name"],
                             message="Album planned", detail=tracks["album_name"], percent=6)
@@ -483,6 +611,9 @@ class AlbumGeneratorApp:
                 merged["inference_steps"] = INFERENCE_STEPS
                 merged["synth_model"] = SYNTH_MODEL
                 merged["lm_model"] = LM_MODEL
+                if ref_audio_path:
+                    merged["task_type"] = "cover"
+                    merged["audio_cover_strength"] = audio_cover_strength
 
                 d = safe_int(merged.get("duration"), 0)
                 if d < dur_min or d > dur_max:
@@ -513,7 +644,7 @@ class AlbumGeneratorApp:
                                 detail=f"Track {i+1}: \"{entry['title']}\"", percent=pct)
                 self.job_track_update(i, "working")
                 try:
-                    wav_path = self._generate_track(entry, i+1)
+                    wav_path = self._generate_track(entry, i+1, ref_audio_path=ref_audio_path)
                     track_num = i + 1
                     flac_name = f"{track_num:02d} - {entry['slug']}.flac"
                     flac_path = OUTPUT_DIR / flac_name
@@ -546,8 +677,9 @@ class AlbumGeneratorApp:
             self.job_update(running=False, done=True, stage="error", error=str(e),
                             message="Generation failed.", detail=str(e), percent=100)
 
-    def _plan_tracks(self, llm_url, style, num_tracks, target_duration):
-        system_prompt = build_tracks_system_prompt(self.song_writing_guide)
+    def _plan_tracks(self, llm_url, style, num_tracks, target_duration, ref_audio_path=None):
+        system_prompt = (build_cover_system_prompt(self.song_writing_guide) if ref_audio_path
+                         else build_tracks_system_prompt(self.song_writing_guide))
         user_prompt = (
             f"Create an album of {num_tracks} distinct track(s) based on this style:\n\n"
             f"{style}\n\n"
@@ -638,7 +770,7 @@ class AlbumGeneratorApp:
             raise RuntimeError(detail)
         return result
 
-    def _generate_track(self, entry, track_num):
+    def _generate_track(self, entry, track_num, ref_audio_path=None):
         json_path = entry["json"]
         stem = json_path.stem
 
@@ -658,6 +790,8 @@ class AlbumGeneratorApp:
                 current["seed"] = 0
                 current["inference_steps"] = INFERENCE_STEPS
                 current["synth_model"] = SYNTH_MODEL
+                if ref_audio_path and ref_audio_path.exists():
+                    current["task_type"] = "cover"
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(current, f, indent=4)
                 logger.info(f"Updated track json with generated audio codes: {json_path.name}")
@@ -669,10 +803,13 @@ class AlbumGeneratorApp:
             llm_json.unlink(missing_ok=True)
 
         before = {p.name for p in OUTPUT_DIR.glob("*.wav")}
-        self._run_cmd([
+        synth_cmd = [
             ACE_SYNTH, "--models", ACE_MODELS, "--request", json_path,
             "--vae-chunk", "512", "--vae-overlap", "128"
-        ], timeout=7200)
+        ]
+        if ref_audio_path and ref_audio_path.exists():
+            synth_cmd += ["--ref-audio", str(ref_audio_path)]
+        self._run_cmd(synth_cmd, timeout=7200)
 
         candidates = [p for p in OUTPUT_DIR.glob(f"{stem}*.wav") if p.name not in before]
         if not candidates:
