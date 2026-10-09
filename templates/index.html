@@ -71,10 +71,33 @@ animation: spin 0.8s linear infinite; }
 </div>
 
 <div class="space-y-2">
+<label class="block text-sm font-medium">LLM Server URL</label>
+<input type="text" id="llmUrl" class="text-input" value="{{ llm_url }}">
+<p class="text-xs text-gray-400 mt-1">Endpoint for the planning LLM (OpenAI-compatible /v1/chat/completions).</p>
+</div>
+
+<div class="space-y-2">
 <label class="block text-sm font-medium">Style Description <span class="text-red-500">*</span></label>
 <textarea id="style" class="text-input w-full" style="min-height: 10rem;"
 placeholder="Describe the album you want. E.g. 'A dark synthwave concept album about a night drive through a rain-soaked city — retro analog synths, driving bass, neon atmosphere.'"></textarea>
 </div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-[#333]">
+<div class="space-y-2">
+<label class="block text-sm font-medium">Cover Reference Track <span class="text-xs text-gray-400">(optional)</span></label>
+<div class="flex items-center gap-2">
+<input type="file" id="refAudio" accept="audio/*" class="text-input">
+<button type="button" id="clearRefBtn" class="btn bg-[#5f6368] hover:bg-[#4a4d50] text-white whitespace-nowrap">Clear</button>
+</div>
+<p class="text-xs text-gray-400 mt-1">Upload a song to generate album tracks as covers of it. Omitting it generates original music.</p>
+</div>
+<div class="space-y-2">
+<label class="block text-sm font-medium">Cover Strength</label>
+<input type="number" id="coverStrength" class="text-input" value="1.0" step="0.01" min="0" max="2">
+<p class="text-xs text-gray-400 mt-1">How strongly the reference influences each track. 1 = default, higher stays closer, lower invents more.</p>
+</div>
+</div>
+<div id="refAudioStatus" class="hidden text-xs text-green-500 mt-1"></div>
 
 <div class="flex justify-center pt-2">
 <button type="button" id="startBtn" class="btn btn-primary px-12 py-3 text-lg font-bold">Generate Album</button>
@@ -132,6 +155,57 @@ class="rounded-lg border border-[#444] mx-auto" style="max-width: 256px;">
 <script>
 $(document).ready(function() {
 let pollTimer = null;
+let refAudioFilename = '';
+
+// Cover reference upload
+$('#refAudio').on('change', function() {
+const file = this.files[0];
+const $status = $('#refAudioStatus');
+if (!file) {
+$('#refAudio').val('');
+return;
+}
+$status.removeClass('hidden text-green-500 text-red-500').addClass('text-green-500').text('Uploading "' + file.name + '"...');
+$('#coverStrength').prop('disabled', true);
+const fd = new FormData();
+fd.append('ref_audio', file);
+$.ajax({
+url: '/upload/ref_audio',
+type: 'POST',
+data: fd,
+processData: false,
+contentType: false,
+success: function(resp) {
+if (resp.status === 'ok') {
+refAudioFilename = resp.filename;
+$status.removeClass('hidden text-green-500 text-red-500').addClass('text-green-500')
+.text('Reference loaded: ' + file.name);
+} else {
+$status.removeClass('hidden text-green-500 text-red-500').addClass('text-red-500')
+.text(resp.message || 'Upload failed.');
+}
+},
+error: function() {
+$status.removeClass('hidden text-green-500 text-red-500').addClass('text-red-500')
+.text('Upload failed. Check server connection.');
+},
+complete: function() {
+$('#coverStrength').prop('disabled', false);
+}
+});
+});
+
+// Clear cover reference
+$('#clearRefBtn').on('click', function() {
+const $status = $('#refAudioStatus');
+if (refAudioFilename) {
+$.post('/clear/ref_audio');
+}
+$('#refAudio').val('');
+refAudioFilename = '';
+$('#coverStrength').val('1.0');
+$status.addClass('hidden').removeClass('text-green-500 text-red-500').text('');
+});
 
 function showError(msg) {
 $('#errorBanner').html(msg).removeClass('hidden');
@@ -245,8 +319,13 @@ clearError();
 const style = $('#style').val().trim();
 const numTracks = parseInt($('#numTracks').val()) || 1;
 const targetDuration = parseInt($('#targetDuration').val()) || 180;
+const audioCoverStrength = parseFloat($('#coverStrength').val());
 
 if (!style) { showError('Please enter a style description.'); return; }
+if (isNaN(audioCoverStrength) || audioCoverStrength < 0) {
+showError('Cover strength must be 0 or greater.');
+return;
+}
 
 $('#startBtn').prop('disabled', true);
 $('#doneCard').addClass('hidden');
@@ -268,7 +347,10 @@ contentType: 'application/json',
 data: JSON.stringify({
 style: style,
 num_tracks: numTracks,
-target_duration: targetDuration
+target_duration: targetDuration,
+llm_url: $('#llmUrl').val().trim(),
+ref_audio_filename: refAudioFilename,
+audio_cover_strength: audioCoverStrength
 }),
 success: function(resp) {
 if (resp.status === 'started') {
