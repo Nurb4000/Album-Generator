@@ -24,7 +24,36 @@ rendering), so you always know it is working. Once a track finishes generating,
 a native HTML5 audio player appears inline so you can preview it directly in
 the browser before downloading the full album.
 
+Optionally upload a **Reference Track** to steer the album's timbre and character
+toward an existing song — see [Reference track](#reference-track-optional) below.
+
+## Reference track (optional)
+
+Upload an optional **Reference Track** in the form and each song is generated with
+ACE-Step's **timbre reference** conditioning so the album borrows the reference's
+sonic character. Leave it empty for fully original music.
+
+- **Mode:** tracks are synthesized in ACE-Step **`text2music`** mode with the
+  reference passed as `--ref-audio` (a timbre reference), **not** `cover` mode.
+- **Duration stays under your control.** Each track still lands near your target
+  length. Cover mode would derive the output duration from the source audio;
+  reference mode does not.
+- **Reference Strength** maps to ACE-Step's `audio_cover_strength`: `1.0` (default)
+  follows the planned arrangement closely; lower values let the model interpret more
+  freely by swapping the source-context latents for silence partway through diffusion.
+- The planner also switches to a reference-guided prompt so each track is framed as a
+  distinct interpretation sharing the reference's character.
+
 ## Changelog
+
+### Optional reference track (timbre reference)
+- Added an optional **Reference Track** upload that conditions the album on a song's
+  timbre/character.
+- Tracks are now generated with ACE-Step `text2music` + `--ref-audio` (timbre
+  reference) instead of `cover` mode, so the **target track length is respected**.
+  Cover mode derived duration from the source audio, which ignored the UI length.
+- The UI's "Cover Strength" is now "Reference Strength" and maps to
+  `audio_cover_strength` (controls how closely tracks follow the planned arrangement).
 
 ### File naming format (track files)
 - Track JSON and audio files now use the format: `NN - Song Title.json` / `NN - Song Title.flac`
