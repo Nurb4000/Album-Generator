@@ -261,7 +261,8 @@ def build_tracks_system_prompt(guide_content: str) -> str:
         "The user will provide a style description, a number of tracks, and a target duration. "
         "You are creating ONE COHESIVE ALBUM: every track must feel like it belongs on the same record, "
         "yet each track must be a distinct, interesting song with its own identity and angle on the style.\n\n"
-        "Return ONLY a valid JSON array where each element is a complete track configuration object.\n\n"
+        "Return ONLY valid JSON: a single track configuration object, or a JSON array of such "
+        "objects.\n\n"
         "## Titles (CRITICAL)\n"
         "- Every track object MUST include a 'title' key: a unique, evocative SONG NAME (not a description).\n"
         "- No two tracks may share a title. No numbering, no quotes, no colons. Max ~50 characters.\n"
@@ -287,6 +288,20 @@ def build_tracks_system_prompt(guide_content: str) -> str:
         "## Avoiding AI-Flavored Lyrics\n"
         "- No adjective stacking, no inconsistent rhyme patterns, no blurred section boundaries.\n"
         "- Keep lines singable (6-10 syllables). Stick to one core metaphor per song.\n\n"
+        "## Album-Wide Uniqueness (CRITICAL - DO NOT REPEAT)\n"
+        "- Write EVERY track from scratch. Never reuse a line, couplet, verse, bridge, or chorus "
+        "from another track, even when the songs share a mood or theme.\n"
+        "- The same line must never appear in more than one track. Once you have written a verse or "
+        "chorus, that exact wording is spent and must not be copied into any other track.\n"
+        "- Each track needs a distinct chorus hook (its own title line, imagery, and closing couplet). "
+        "Do not fall back on stock filler phrases such as 'in the silence we remain', "
+        "'when time takes its toll', 'we still have each other', or 'find our way home'.\n"
+        "- Within a single track, Verse 1 and Verse 2 must differ; never repeat a verse.\n"
+        "- Vary scenery and object imagery between tracks (streets, windows, rain, trains, stars, "
+        "candles, records, coffee) so no two songs conjure the same picture.\n"
+        "- Give each track its own narrative angle and central image while keeping the album cohesive.\n"
+        "- Before finalizing, re-read all tracks written so far; if any line echoes an earlier one, "
+        "rewrite it.\n\n"
         "## Track Object Keys\n"
         "Each track must have:\n"
         "- title: Unique short song name (see Titles rules above).\n"
@@ -340,7 +355,8 @@ def build_reference_system_prompt(guide_content: str) -> str:
         "You are creating ONE COHESIVE ALBUM: every track must feel like it belongs on the same record, "
         "yet each track must be a distinct, interesting reinterpretation of the cover reference with "
         "its own identity and angle on the style.\n\n"
-        "Return ONLY a valid JSON array where each element is a complete track configuration object.\n\n"
+        "Return ONLY valid JSON: a single track configuration object, or a JSON array of such "
+        "objects.\n\n"
         "## Titles (CRITICAL)\n"
         "- Every track object MUST include a 'title' key: a unique, evocative SONG NAME (not a description).\n"
         "- No two tracks may share a title. No numbering, no quotes, no colons. Max ~50 characters.\n"
@@ -366,6 +382,20 @@ def build_reference_system_prompt(guide_content: str) -> str:
         "## Avoiding AI-Flavored Lyrics\n"
         "- No adjective stacking, no inconsistent rhyme patterns, no blurred section boundaries.\n"
         "- Keep lines singable (6-10 syllables). Stick to one core metaphor per song.\n\n"
+        "## Album-Wide Uniqueness (CRITICAL - DO NOT REPEAT)\n"
+        "- Write EVERY track from scratch. Never reuse a line, couplet, verse, bridge, or chorus "
+        "from another track, even when the songs share a mood or theme.\n"
+        "- The same line must never appear in more than one track. Once you have written a verse or "
+        "chorus, that exact wording is spent and must not be copied into any other track.\n"
+        "- Each track needs a distinct chorus hook (its own title line, imagery, and closing couplet). "
+        "Do not fall back on stock filler phrases such as 'in the silence we remain', "
+        "'when time takes its toll', 'we still have each other', or 'find our way home'.\n"
+        "- Within a single track, Verse 1 and Verse 2 must differ; never repeat a verse.\n"
+        "- Vary scenery and object imagery between tracks (streets, windows, rain, trains, stars, "
+        "candles, records, coffee) so no two songs conjure the same picture.\n"
+        "- Give each track its own narrative angle and central image while keeping the album cohesive.\n"
+        "- Before finalizing, re-read all tracks written so far; if any line echoes an earlier one, "
+        "rewrite it.\n\n"
         "## Track Object Keys\n"
         "Each track must have:\n"
         "- title: Unique short song name (see Titles rules above).\n"
@@ -677,31 +707,124 @@ class AlbumGeneratorApp:
             self.job_update(running=False, done=True, stage="error", error=str(e),
                             message="Generation failed.", detail=str(e), percent=100)
 
-    def _plan_tracks(self, llm_url, style, num_tracks, target_duration, ref_audio_path=None):
-        system_prompt = (build_reference_system_prompt(self.song_writing_guide) if ref_audio_path
-                         else build_tracks_system_prompt(self.song_writing_guide))
+    @staticmethod
+    def _lyric_lines(lyrics):
+        lines = []
+        for ln in (lyrics or "").splitlines():
+            s = ln.strip()
+            if not s or (s.startswith("[") and s.endswith("]")):
+                continue
+            lines.append(re.sub(r"\s+", " ", s).lower())
+        return lines
+
+    def _repeated_lines(self, candidate_lyrics, prev_tracks):
+        candidate = set(self._lyric_lines(candidate_lyrics))
+        if not candidate:
+            return set()
+        previous = set()
+        for pt in prev_tracks:
+            previous.update(self._lyric_lines(pt.get("lyrics")))
+        return candidate & previous
+
+    def _prior_tracks_context(self, prev_tracks, max_chars=48000):
+        if not prev_tracks:
+            return ""
+        titles = "; ".join(f"{j}. {pt.get('title', '')}" for j, pt in enumerate(prev_tracks, 1))
+        blocks = []
+        for j, pt in enumerate(prev_tracks, 1):
+            body = (pt.get("lyrics") or "").strip()
+            head = (f"### Track {j}: {pt.get('title', '')} "
+                    f"(duration {pt.get('duration', 0)}s, bpm {pt.get('bpm', 0)})")
+            blocks.append(f"{head}\n{body}")
+        joined = "\n\n".join(blocks)
+        if len(joined) > max_chars:
+            kept, total = [], 0
+            for block in reversed(blocks):
+                if kept and total + len(block) > max_chars:
+                    break
+                kept.append(block)
+                total += len(block)
+            joined = "\n\n".join(reversed(kept))
+        return f"Titles already used (all forbidden): {titles}\n\n{joined}"
+
+    def _plan_single_track(self, llm_url, system_prompt, style, target_duration,
+                           index, total, prev_tracks, avoid_lines=None):
+        context = self._prior_tracks_context(prev_tracks)
+        prior_section = ""
+        if context:
+            prior_section = (
+                "\n\n## TRACKS ALREADY WRITTEN - ALL OF THIS IS OFF-LIMITS\n"
+                "The songs below are already on the album. Your new track MUST NOT reuse, copy, or "
+                "closely paraphrase any line, image, rhyme, chorus hook, verse, or bridge from them. "
+                "Study them, then deliberately write something different.\n\n"
+                f"{context}\n"
+            )
+        avoid_section = ""
+        if avoid_lines:
+            shown = " | ".join(sorted(avoid_lines)[:12])
+            avoid_section = (
+                f"\n\nYou previously reused these exact lines, which is forbidden: {shown}. "
+                "Do not use them or any close variation; write entirely new lines.\n"
+            )
         user_prompt = (
-            f"Create an album of {num_tracks} distinct track(s) based on this style:\n\n"
-            f"{style}\n\n"
+            f"Album style:\n{style}\n\n"
             f"Target duration per track: approximately {target_duration} seconds "
-            f"(each track should land within +/-10% of this)."
+            f"(this track should land within +/-10% of that).\n\n"
+            f"Write track {index} of {total}.\n"
+            f"{prior_section}{avoid_section}\n"
+            f"Return a JSON array containing exactly ONE track object for track {index} "
+            f"(its title must not duplicate any title listed above)."
         )
-        logger.info(f"Calling external LLM at {llm_url}/v1/chat/completions for track planning...")
+        logger.info(f"Calling LLM at {llm_url}/v1/chat/completions for track {index}/{total}...")
         content = call_llm(llm_url, [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ], 0.8, 16384)
+        ], 0.8, 8192)
         parsed = extract_json_from_llm_response(content)
         if isinstance(parsed, dict):
-            parsed = [parsed]
-        if not isinstance(parsed, list) or not parsed:
-            raise ValueError("LLM did not return a valid track list.")
-        parsed = parsed[:num_tracks]
-        for i, t in enumerate(parsed):
-            if not isinstance(t, dict):
-                raise ValueError(f"Track {i+1} is not a valid object.")
-            if not t.get("title"):
-                t["title"] = f"Track {i+1}"
+            track = parsed
+        elif isinstance(parsed, list) and parsed:
+            track = parsed[0]
+        else:
+            raise ValueError(f"Track {index} did not return a valid object.")
+        if not isinstance(track, dict):
+            raise ValueError(f"Track {index} is not a valid object.")
+        if not track.get("title"):
+            track["title"] = f"Track {index}"
+        return track
+
+    def _plan_tracks(self, llm_url, style, num_tracks, target_duration, ref_audio_path=None):
+        system_prompt = (build_reference_system_prompt(self.song_writing_guide) if ref_audio_path
+                         else build_tracks_system_prompt(self.song_writing_guide))
+        parsed = []
+        for i in range(num_tracks):
+            self.job_update(message=f"Writing song {i+1}/{num_tracks}...",
+                            detail=f"Planning track {i+1} of {num_tracks}...",
+                            percent=2 + int((i / max(num_tracks, 1)) * 3))
+            track = None
+            avoid_lines = None
+            for attempt in range(3):
+                try:
+                    candidate = self._plan_single_track(
+                        llm_url, system_prompt, style, target_duration,
+                        i + 1, num_tracks, parsed, avoid_lines=avoid_lines)
+                except Exception as e:
+                    logger.warning(f"Track {i+1} attempt {attempt + 1} failed to plan: {e}")
+                    continue
+                dups = self._repeated_lines(candidate.get("lyrics"), parsed)
+                if not dups:
+                    track = candidate
+                    break
+                logger.warning(
+                    f"Track {i+1} attempt {attempt + 1} reused {len(dups)} line(s) "
+                    f"from earlier tracks: {sorted(dups)[:3]}"
+                )
+                track = candidate
+                avoid_lines = dups
+            if track is None:
+                raise ValueError(f"Failed to plan track {i + 1} after multiple attempts.")
+            parsed.append(track)
+            logger.info(f"Planned track {i+1}/{num_tracks}: {track.get('title')}")
 
         album_name = ""
         raw_snippet = ""
